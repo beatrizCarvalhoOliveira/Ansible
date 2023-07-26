@@ -1,0 +1,367 @@
+- name: Create AWS Infrastructure
+  hosts: localhost
+  gather_facts: no
+  vars:
+    aws_region: us-east-1
+    subnet1_public_az: us-east-1a
+    subnet2_public_az: us-east-1b
+
+  tasks:
+    - name: Create VPC
+      ec2_vpc_net:
+        name: vpc_project2
+        cidr_block: 10.0.0.0/16
+        region: "{{ aws_region }}"
+        tags:
+          - key: Name
+            value: vpc_project7
+          - key: project
+            value: wecloud
+      register: vpc
+      changed_when: false
+
+    - name: Create Internet Gateway
+      ec2_vpc_igw:
+        vpc_id: "{{ vpc.vpc.id }}"
+        tags:
+          - key: Name
+            value: igw-project7
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: igw
+
+    - name: Attach Internet Gateway to VPC
+      ec2_vpc_igw:
+        vpc_id: "{{ vpc.vpc.id }}"
+        state: present
+        internet_gateway_id: "{{ igw.gateway_id }}"
+        region: "{{ aws_region }}"
+
+    - name: Create Public Subnet 1
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc.vpc.id }}"
+        cidr: 10.0.0.0/24
+        az: "{{ subnet1_public_az }}"
+        tags:
+          - key: Name
+            value: public_subnet1_project7
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: subnet1_public
+
+    - name: Enable public subnet1 to auto-assign public IP
+      ec2_vpc_subnet_attribute:
+        vpc_id: "{{ vpc.vpc.id }}"
+        subnet_id: "{{ subnet1_public.subnet.id }}"
+        map_public_ip_on_launch: true
+        region: "{{ aws_region }}"
+
+    - name: Create Public Route Table
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        tags:
+          - key: Name
+            value: public_rt_project7
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: public_route_table
+
+    - name: Add Route to Internet Gateway
+      ec2_vpc_route:
+        vpc_id: "{{ vpc.vpc.id }}"
+        route_table_id: "{{ public_route_table.route_table.id }}"
+        dest: 0.0.0.0/0
+        gateway_id: "{{ igw.gateway_id }}"
+        region: "{{ aws_region }}"
+
+    - name: Associate Public Subnet 1 with Public Route Table
+      ec2_vpc_subnet:
+        vpc_id: "{{  vpc.vpc.id }}"
+        subnet_id: "{{ subnet1_public_id }}"
+        route_table_ids:
+          - "{{ public_route_table.route_table.id }}"
+        region: "{{ aws_region }}"
+
+    - name: Create Public Subnet 2
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc.vpc.id }}"
+        cidr: 10.0.9.0/24
+        az: "{{ subnet2_public_az }}"
+        tags:
+          - key: Name
+            value: public_subnet2_project7
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: subnet2_public
+
+    - name: Enable public subnet2 to auto-assign public IP
+      ec2_vpc_subnet_attribute:
+        vpc_id: "{{ vpc.vpc.id }}"
+        subnet_id: "{{ subnet2_public.subnet.id }}"
+        map_public_ip_on_launch: true
+        region: "{{ aws_region }}"
+
+    - name: Associate Public Subnet 2 with Public Route Table
+      ec2_vpc_subnet:
+        vpc_id: "{{  vpc.vpc.id }}"
+        subnet_id: "{{ subnet2_public_id }}"
+        route_table_ids:
+          - "{{ public_route_table.route_table.id }}"
+        region: "{{ aws_region }}"
+
+    - name: Create Private Subnet 
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc.vpc.id }}"
+        cidr: 10.0.10.0/24
+        az: "{{ subnet_private_az }}"
+        tags:
+          - key: Name
+            value: private_subnet_project7
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: subnet_private
+
+    - name: Create Private Route Table
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        tags:
+          - key: Name
+            value: private_rt_project7
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: private_route_table
+    
+    - name: Associate Private Subnet  with Private Route Table
+      ec2_vpc_subnet:
+        vpc_id: "{{  vpc.vpc.id }}"
+        subnet_id: "{{ subnet_private_id }}"
+        route_table_ids:
+          - "{{ private_route_table.route_table.id }}"
+        region: "{{ aws_region }}"
+
+    - name: Create key-pair
+      ec2_key:
+        name: "{{ project7_key }}"
+        key_material: "{{ lookup('file', 'project7_key.pem') }}"
+        key_type: rsa
+        region: "{{ aws_region }}"
+      register: key_pair
+
+    - name: Create ALB Security Group
+      ec2_group:
+        name: project7_alb_sg
+        description: "Application Load Balancer sg"
+        vpc_id: "{{  vpc.vpc.id }}"
+        tags:
+          - key: Name
+            value: project7_alb_sg
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: sg_alb
+
+    - name: Authorize ALB Security Group Ingress
+      ec2_group:
+        name: "{{ sg_alb.group_id }}"
+        region: "{{ aws_region }}"
+        rules:
+          - proto: tcp
+            ports:
+              - "80"
+              - "443"
+            cidr_ip: 0.0.0.0/0
+
+    - name: Create Application Security Group
+      ec2_group:
+        name: project7_app_sg
+        description: "Application sg"
+        vpc_id: "{{ vpc.vpc.id }}"
+        tags:
+          - key: Name
+            value: project7_app_sg
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: sg_app
+
+    - name: Authorize Application Security Group Ingress
+      ec2_group:
+        name: "{{ sg_app.group_id }}"
+        region: "{{ aws_region }}"
+        rules:
+          - proto: tcp
+            ports:
+              - "80"
+              - "443"
+              - "3000"
+            source_group_id: "{{ sg_alb.group_id }}"
+
+    - name: Allocate Elastic IP
+      ec2_vpc_eip:
+        region: "{{ aws_region }}"
+      register: eip
+
+    - name: Create NAT Gateway
+      ec2_vpc_nat_gateway:
+        subnet_id: "{{ subnet1_public.subnet.id }}"
+        eip_id: "{{ eip.public_ip }}"
+        region: "{{ aws_region }}"
+      register: nat_gw
+
+    - name: Wait for NAT Gateway to be available
+      ec2_vpc_nat_gateway_info:
+        region: "{{ aws_region }}"
+        nat_gateway_id: "{{ nat_gw.nat_gateway_id }}"
+        state: present
+      register: nat_gw_info
+      until: nat_gw_info.nat_gateways[0].state == 'available'
+      retries: 30
+      delay: 10
+
+       - name: Add route to NAT Gateway in the private route table
+      ec2_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"  
+        route_table_id: "{{  private_route_table_id }}"
+        routes:
+          - dest: "0.0.0.0/0"
+            gateway_id: "{{ nat_gw_id }}"
+        region: "{{ aws_region }}"
+
+   - name: Create Database Security Group
+      ec2_group:
+        name: project7_db_sg
+        description: "Database sg"
+        vpc_id: "{{  vpc.vpc.id }}"
+        tags:
+          - key: Name
+            value: project7_db_sg
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: sg_db
+
+    - name: Authorize DB Security Group Ingress from the APP SG
+      ec2_group:
+        name: "{{ sg_db.group_id }}"
+        region: "{{ aws_region }}"
+        rules:
+          - proto: tcp
+            ports:
+              - "27017"
+            source_group_id: "{{ sg_app_id }}"
+
+ 
+    - name: Create EC2 Instance for Database
+      ec2_instance:
+        instance_type: t2.micro
+        image_id: ami-0aa2b7722dc1b5612
+        key_name: project7_key
+        subnet_id: "{{ subnet_private }}"  
+        private_ip_address: "10.0.10.10"  
+        security_group_ids:
+          - "{{ sg_db.group_id }}"
+        user_data: "{{ lookup('file', 'userdata.sh') }}"
+        tags:
+          - key: Name
+            value: db-ec2
+          - key: project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: db_instance
+
+    - name: Create Target Group
+      ec2_target_group:
+        name: project7-target-group
+        protocol: HTTP
+        port: "{{ tg_port }}"
+        vpc_id: "{{ vpc.vpc.id }}"
+        tags:
+          - key: Name
+            value: target_group_project7
+          - key: Project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: target_group
+
+    - name: Create Application Load Balancer
+      ec2_elbv2_lb:
+        name: project7-load-balancer
+        subnets:
+          - "{{ subnet1_public }}"
+          - "{{ subnet2_public }}"
+        security_groups:
+          - "{{ sg_alb_id }}"
+        type: application
+        tags:
+          - key: Name
+            value: alb_project7
+          - key: Project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: alb
+
+    - name: Create Listener for the Load Balancer
+      ec2_elbv2_listener:
+        load_balancer_arn: "{{ alb.load_balancers[0].load_balancer_arn }}"
+        protocol: HTTP
+        port: 80
+        default_actions:
+          - type: forward
+            target_group_arn: "{{ target_group.target_groups[0].target_group_arn }}"
+        tags:
+          - key: Name
+            value: listener_project7
+          - key: Project
+            value: wecloud
+        region: "{{ aws_region }}"
+
+    - name: Create Launch Template
+      ec2_launch_template:
+        name: project7-launch-template
+        image_id: ami-0aa2b7722dc1b5612
+        instance_type: t2.micro
+        key_name: project7_key
+        security_group_ids:
+          - "{{ sg_app_id }}"
+        user_data: "{{ lookup('file', 'userdata_app.sh') }}"
+        tags:
+          - key: Name
+            value: launchtemp_project7
+          - key: Project
+            value: wecloud
+        region: "{{ aws_region }}"
+      register: launch_template
+
+
+    - name: Create Auto Scaling Group
+      ec2_asg:
+        name: project7-scaling-group
+        launch_template:
+          id: "{{ launch_template.launch_template_id }}"
+        min_size: 2
+        max_size
+
+    - name: Create Scaling Policy
+      aws_autoscaling_policy:
+        name: cpu-scaling-policy
+        region: us-east-1
+        autoscaling_group_name: project7-scaling-group
+        adjustment_type: ChangeInCapacity
+        scaling_adjustment: 1
+        min_adjustment_magnitude: 1
+        policy_type: TargetTrackingScaling
+        target_tracking_configuration:
+          predefined_metric_specification:
+            predefined_metric_type: ASGAverageCPUUtilization
+            target_value: 80
+        tags:
+          - key: Name
+            value: cpu-scaling-policy
+            propagate_at_launch: true
+      register: scaling_policy
