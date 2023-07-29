@@ -12,42 +12,20 @@
         name: vpc_project2
         cidr_block: 10.0.0.0/16
         region: "{{ aws_region }}"
-        tags:
-          - key: Name
-            value: vpc_project7
-          - key: project
-            value: wecloud
       register: vpc
       changed_when: false
 
     - name: Create Internet Gateway
       ec2_vpc_igw:
         vpc_id: "{{ vpc.vpc.id }}"
-        tags:
-          - key: Name
-            value: igw-project7
-          - key: project
-            value: wecloud
         region: "{{ aws_region }}"
       register: igw
-
-    - name: Attach Internet Gateway to VPC
-      ec2_vpc_igw:
-        vpc_id: "{{ vpc.vpc.id }}"
-        state: present
-        internet_gateway_id: "{{ igw.gateway_id }}"
-        region: "{{ aws_region }}"
 
     - name: Create Public Subnet 1
       ec2_vpc_subnet:
         vpc_id: "{{ vpc.vpc.id }}"
         cidr: 10.0.0.0/24
         az: "{{ subnet1_public_az }}"
-        tags:
-          - key: Name
-            value: public_subnet1_project7
-          - key: project
-            value: wecloud
         region: "{{ aws_region }}"
       register: subnet1_public
 
@@ -70,7 +48,7 @@
       register: public_route_table
 
     - name: Add Route to Internet Gateway
-      ec2_vpc_route:
+      ec2_vpc_route_table:
         vpc_id: "{{ vpc.vpc.id }}"
         route_table_id: "{{ public_route_table.route_table.id }}"
         dest: 0.0.0.0/0
@@ -99,7 +77,7 @@
       register: subnet2_public
 
     - name: Enable public subnet2 to auto-assign public IP
-      ec2_vpc_subnet_attribute:
+      ec2_vpc_subnet:
         vpc_id: "{{ vpc.vpc.id }}"
         subnet_id: "{{ subnet2_public.subnet.id }}"
         map_public_ip_on_launch: true
@@ -203,7 +181,7 @@
             source_group_id: "{{ sg_alb.group_id }}"
 
     - name: Allocate Elastic IP
-      ec2_vpc_eip:
+      ec2_eip:
         region: "{{ aws_region }}"
       register: eip
 
@@ -224,8 +202,8 @@
       retries: 30
       delay: 10
 
-       - name: Add route to NAT Gateway in the private route table
-      ec2_route_table:
+    - name: Add route to NAT Gateway in the private route table
+      ec2_vpc_route_table:
         vpc_id: "{{ vpc.vpc.id }}"  
         route_table_id: "{{  private_route_table_id }}"
         routes:
@@ -233,7 +211,7 @@
             gateway_id: "{{ nat_gw_id }}"
         region: "{{ aws_region }}"
 
-   - name: Create Database Security Group
+    - name: Create Database Security Group
       ec2_group:
         name: project7_db_sg
         description: "Database sg"
@@ -276,7 +254,7 @@
       register: db_instance
 
     - name: Create Target Group
-      ec2_target_group:
+      elb_target_group:
         name: project7-target-group
         protocol: HTTP
         port: "{{ tg_port }}"
@@ -290,7 +268,7 @@
       register: target_group
 
     - name: Create Application Load Balancer
-      ec2_elbv2_lb:
+      elb_application_lb_facts:
         name: project7-load-balancer
         subnets:
           - "{{ subnet1_public }}"
@@ -307,7 +285,7 @@
       register: alb
 
     - name: Create Listener for the Load Balancer
-      ec2_elbv2_listener:
+      ec2_elb_lb:
         load_balancer_arn: "{{ alb.load_balancers[0].load_balancer_arn }}"
         protocol: HTTP
         port: 80
@@ -345,10 +323,10 @@
         launch_template:
           id: "{{ launch_template.launch_template_id }}"
         min_size: 2
-        max_size
+        max_size: 4
 
     - name: Create Scaling Policy
-      aws_autoscaling_policy:
+      ec2_scaling_policy:
         name: cpu-scaling-policy
         region: us-east-1
         autoscaling_group_name: project7-scaling-group
